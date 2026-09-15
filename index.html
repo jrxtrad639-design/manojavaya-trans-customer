@@ -211,23 +211,10 @@ function buildWhatsAppUrl(payload, requestId){
   ].filter(Boolean).join('\n');
   return 'https://wa.me/628563859777?text='+encodeURIComponent(message);
 }
-async function postBooking(payload, clientRequestId){
-  const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),REQUEST_TIMEOUT_MS);
-  try{
-    const r=await fetch(API_BASE+'/api/booking-requests',{
-      method:'POST',
-      headers:{'Content-Type':'application/json','Accept':'application/json'},
-      body:JSON.stringify({...payload,client_request_id:clientRequestId}),
-      signal:controller.signal,
-      cache:'no-store'
-    });
-    let data={}; try{data=await r.json();}catch{}
-    if(!r.ok && !(data && data.request_id)) throw new Error(data.error||('Booking failed ('+r.status+')'));
-    if(!data.request_id) throw new Error('The booking server did not return a Booking ID.');
-    return data;
-  }finally{clearTimeout(timer);}
-}
+const r=await fetch(API_BASE+'/api/booking-requests',{
+  method:'POST',
+  headers:{'Content-Type':'application/json','Accept':'application/json'},
+  body:JSON.stringify({...payload,client_request_id:clientRequestId}),
 
 // Recovery path: if the POST reached the Worker but the browser could not
 // read its response (for example a transient CORS/network response error),
