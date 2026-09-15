@@ -223,12 +223,32 @@ async function postBooking(payload, clientRequestId){
       cache:'no-store'
     });
     let data={}; try{data=await r.json();}catch{}
-    // Some idempotent APIs return 409 for a repeated client_request_id while
-    // still returning the original request_id. Treat that as success.
     if(!r.ok && !(data && data.request_id)) throw new Error(data.error||('Booking failed ('+r.status+')'));
     if(!data.request_id) throw new Error('The booking server did not return a Booking ID.');
     return data;
   }finally{clearTimeout(timer);}
+}
+
+// Recovery path: if the POST reached the Worker but the browser could not
+// read its response (for example a transient CORS/network response error),
+// look up the idempotent booking that was just created. This prevents the
+// Customer UI from falsely reporting failure after a successful database write.
+async function recoverBooking(clientRequestId){
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),8000);
+  try{
+    const r=await fetch(API_BASE+'/api/booking-requests',{
+      method:'GET',
+      headers:{'Accept':'application/json'},
+      signal:controller.signal,
+      cache:'no-store'
+    });
+    if(!r.ok) return null;
+    const rows=await r.json();
+    if(!Array.isArray(rows)) return null;
+    return rows.find(row=>String(row?.client_request_id||'')===String(clientRequestId)) || null;
+  }catch{return null;}
+  finally{clearTimeout(timer);}
 }
 
 document.getElementById('bookingForm').addEventListener('submit', async e=>{
@@ -281,6 +301,24 @@ document.getElementById('bookingForm').addEventListener('submit', async e=>{
     document.getElementById('successCard').style.display='block';
     document.getElementById('successCard').scrollIntoView({behavior:'smooth',block:'start'});
   }catch(err){
+    // The POST may have succeeded even when fetch rejects while reading the
+    // response. Verify the idempotent client_request_id before showing failure.
+    const recovered=await recoverBooking(clientRequestId);
+    if(recovered?.request_id){
+      clearPending();
+      document.getElementById('summary').innerHTML=
+        '<b>Booking ID:</b> '+esc(recovered.request_id)+'<br>'+
+        '<b>Pick-up:</b> '+esc(payload.pickup)+'<br>'+
+        '<b>Destination:</b> '+esc(payload.destination)+'<br>'+
+        '<b>Date:</b> '+esc(payload.date)+'<br>'+
+        '<b>Time:</b> '+esc(payload.time)+'<br>'+
+        '<b>Passengers:</b> '+esc(payload.passengers);
+      document.getElementById('whatsappConfirmBtn').href=buildWhatsAppUrl(payload,recovered.request_id);
+      document.getElementById('bookingCard').style.display='none';
+      document.getElementById('successCard').style.display='block';
+      document.getElementById('successCard').scrollIntoView({behavior:'smooth',block:'start'});
+      return;
+    }
     const message=err?.name==='AbortError'
       ? 'The booking server took too long to respond. Your booking ID is preserved so retrying is safe.'
       : (err?.message||'We could not send your booking.');
