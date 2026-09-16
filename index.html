@@ -215,16 +215,16 @@ async function postBooking(payload, clientRequestId){
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),REQUEST_TIMEOUT_MS);
   try{
+    const body=JSON.stringify({...payload,client_request_id:clientRequestId});
     const r=await fetch(API_BASE+'/api/booking-requests',{
       method:'POST',
-      headers:{'Content-Type':'application/json','Accept':'application/json'},
-      body:JSON.stringify({...payload,client_request_id:clientRequestId}),
+      mode:'cors',
+      headers:{'Content-Type':'text/plain','Accept':'application/json'},
+      body,
       signal:controller.signal,
       cache:'no-store'
     });
     let data={}; try{data=await r.json();}catch{}
-    // Some idempotent APIs return 409 for a repeated client_request_id while
-    // still returning the original request_id. Treat that as success.
     if(!r.ok && !(data && data.request_id)) throw new Error(data.error||('Booking failed ('+r.status+')'));
     if(!data.request_id) throw new Error('The booking server did not return a Booking ID.');
     return data;
@@ -289,9 +289,13 @@ document.getElementById('bookingForm').addEventListener('submit', async e=>{
   }
 });
 
-// Register the PWA service worker only on a real HTTPS origin (or localhost).
-if('serviceWorker' in navigator && (location.protocol==='https:' || location.hostname==='localhost')){
-  window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));
+// Service worker intentionally disabled for booking reliability.
+// The booking API must use the page's native fetch directly.
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>{
+    navigator.serviceWorker.getRegistrations().then(rs=>rs.forEach(r=>r.unregister())).catch(()=>{});
+    if(window.caches) caches.keys().then(keys=>Promise.all(keys.map(k=>caches.delete(k)))).catch(()=>{});
+  });
 }
 </script>
 </body>

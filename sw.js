@@ -1,4 +1,4 @@
-const CACHE = "manojavaya-customer-v1.1.4-ready-1";
+const CACHE = "manojavaya-customer-v1.1.5-final";
 const APP = [
   "./",
   "./index.html",
