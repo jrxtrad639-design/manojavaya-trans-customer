@@ -2,19 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0b2f6b">
-<meta name="description" content="Book a safe, comfortable and on-time ride with Manojavaya Trans.">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Manojavaya Trans">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Manojavaya Trans Customer — Book Your Ride</title>
-<link rel="icon" type="image/png" sizes="32x32" href="./assets/favicon-32.png">
-<link rel="icon" type="image/png" sizes="48x48" href="./assets/favicon-48.png">
-<link rel="icon" type="image/png" sizes="192x192" href="./assets/manojavaya-logo-circle-192.png">
-<link rel="apple-touch-icon" sizes="180x180" href="./assets/apple-touch-icon-180.png">
-<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="512x512" href="./assets/manojavaya-logo-circle-512.png">
+<link rel="apple-touch-icon" sizes="512x512" href="./assets/manojavaya-logo-circle-512.png">
 <style>
 :root{
   --navy:#0b2f6b;
@@ -140,7 +131,6 @@ html, body, body *, body *::before, body *::after {
       <label>Pick-up Time *</label><input id="time" type="time" required>
       <label>Passengers *</label><input id="passengers" type="number" min="1" max="16" value="1" required>
       <label>Additional Notes</label><textarea id="notes" rows="3" placeholder="Flight number, luggage, special requests..."></textarea>
-      <div id="formStatus" role="status" aria-live="polite" style="display:none;margin-top:12px;padding:11px 12px;border-radius:12px;font-size:13px"></div>
       <button id="submitBtn" type="submit">BOOK MY RIDE</button>
     </form>
   </section>
@@ -148,97 +138,59 @@ html, body, body *, body *::before, body *::after {
   <section class="card success" id="successCard">
     <div style="font-size:48px">✅</div>
     <h2>Booking Request Received!</h2>
-    <p>Your booking has been securely received by Manojavaya Trans and is now available to Driver V1.1.4 for processing.</p>
+    <p>Thanks for choosing Manojavaya Trans. Your request has been sent to our driver.</p>
     <div class="summary" id="summary"></div>
-    <p><small>Keep your Booking ID. The driver will review the request and confirm the trip.</small></p>
-    <a id="whatsappConfirmBtn" class="booking-cta" href="#" target="_blank" rel="noopener" style="text-decoration:none;display:block;text-align:center;">CHAT ON WHATSAPP</a>
+    <p><small>We will confirm your booking via WhatsApp shortly.</small></p>
   </section>
 
   <footer class="footer"><strong>MANOJAVAYA TRANS</strong><span>Thank you for choosing our service</span></footer>
 </main>
 
 <script>
+function resolveApiBase(){
+  const stored=(localStorage.getItem('bonkcar_gateway_api')||'').trim().replace(/\/$/,'');
+  const isWeb=location.protocol==='http:'||location.protocol==='https:';
+  if(!isWeb) return stored||'http://localhost:3000';
+  const current=location.origin;
+  // Ignore a stale localhost gateway saved from local testing when Customer is opened online.
+  if(stored && !/^https?:\/\/(localhost|127\.0\.0\.1)(?::\d+)?$/i.test(stored)) return stored;
+  return current;
+}
 const API_BASE = 'https://manojavaya-trans-api.manojavaya-trans.workers.dev';
-const source = (new URLSearchParams(location.search).get('source') || 'WHATSAPP_QR').trim().slice(0,80) || 'WHATSAPP_QR';
-const REQUEST_TIMEOUT_MS = 20000;
-const PENDING_KEY = 'manojavaya_pending_booking_v3';
+const source = new URLSearchParams(location.search).get('source') || 'WHATSAPP_QR';
+
 const d = new Date();
 d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-const todayISO = d.toISOString().slice(0,10);
-const dateInput = document.getElementById('date');
-dateInput.min = todayISO;
-if(!dateInput.value) dateInput.value = todayISO;
+document.getElementById('date').min = d.toISOString().slice(0,10);
+document.getElementById('date').value = d.toISOString().slice(0,10);
 
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));}
-function makeRequestId(){
-  const uuid=(globalThis.crypto&&typeof crypto.randomUUID==='function')?crypto.randomUUID():Math.random().toString(36).slice(2)+Date.now().toString(36);
-  return 'CUS-' + Date.now().toString(36) + '-' + uuid.replace(/[^a-z0-9]/gi,'').slice(0,8);
-}
-function normalizePhone(v){
-  let n=String(v||'').trim().replace(/[^0-9+]/g,'');
-  if(n.startsWith('+')) n=n.slice(1);
-  if(n.startsWith('00')) n=n.slice(2);
-  if(n.startsWith('0')) n='62'+n.slice(1);
-  return n;
-}
-function validPhone(n){return /^62\d{8,13}$/.test(n);}
-function getPending(){
-  try{return JSON.parse(localStorage.getItem(PENDING_KEY)||'null');}catch{return null;}
-}
-function setPending(payload, clientRequestId){
-  localStorage.setItem(PENDING_KEY, JSON.stringify({clientRequestId,payload,savedAt:Date.now()}));
-}
-function clearPending(){localStorage.removeItem(PENDING_KEY);}
-function samePayload(a,b){
-  return !!a && ['name','phone','pickup','destination','date','time','passengers','notes','source'].every(k=>String(a[k]??'')===String(b[k]??''));
-}
-function setStatus(message,type='error'){
-  const el=document.getElementById('formStatus');
-  if(!message){el.style.display='none';el.textContent='';return;}
-  el.style.display='block';
-  el.textContent=message;
-  el.style.background=type==='ok'?'#ecfdf3':'#fff1f2';
-  el.style.color=type==='ok'?'#166534':'#9f1239';
-  el.style.border='1px solid '+(type==='ok'?'#bbf7d0':'#fecdd3');
-}
-function buildWhatsAppUrl(payload, requestId){
-  const message=[
-    'Hello Manojavaya Trans, I have submitted a booking request.','',
-    'Booking ID: '+requestId,'Name: '+payload.name,'WhatsApp: '+payload.phone,
-    'Pick-up: '+payload.pickup,'Destination: '+payload.destination,'Date: '+payload.date,
-    'Pick-up Time: '+payload.time,'Passengers: '+payload.passengers,
+function waNumber(v){let n=String(v||'').replace(/[^0-9]/g,'');if(n.startsWith('0'))n='62'+n.slice(1);return n;}
+function openBookingWhatsApp(payload){
+  const message = [
+    'Hello Manojavaya Trans, I would like to book a ride.',
+    '',
+    'Name: '+payload.name,
+    'WhatsApp: '+payload.phone,
+    'Pick-up: '+payload.pickup,
+    'Destination: '+payload.destination,
+    'Date: '+payload.date,
+    'Pick-up Time: '+payload.time,
+    'Passengers: '+payload.passengers,
     payload.notes ? 'Additional Notes: '+payload.notes : ''
   ].filter(Boolean).join('\n');
-  return 'https://wa.me/628563859777?text='+encodeURIComponent(message);
-}
-async function postBooking(payload, clientRequestId){
-  const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),REQUEST_TIMEOUT_MS);
-  try{
-    const body=JSON.stringify({...payload,client_request_id:clientRequestId});
-    const r=await fetch(API_BASE+'/api/booking-requests',{
-      method:'POST',
-      mode:'cors',
-      headers:{'Content-Type':'text/plain','Accept':'application/json'},
-      body,
-      signal:controller.signal,
-      cache:'no-store'
-    });
-    let data={}; try{data=await r.json();}catch{}
-    if(!r.ok && !(data && data.request_id)) throw new Error(data.error||('Booking failed ('+r.status+')'));
-    if(!data.request_id) throw new Error('The booking server did not return a Booking ID.');
-    return data;
-  }finally{clearTimeout(timer);}
+  const url='https://wa.me/628563859777?text='+encodeURIComponent(message);
+  window.open(url,'_blank','noopener');
 }
 
 document.getElementById('bookingForm').addEventListener('submit', async e=>{
   e.preventDefault();
-  const form=e.currentTarget;
-  setStatus('');
-  if(!form.reportValidity()) return;
+  const btn=document.getElementById('submitBtn');
+  btn.disabled=true; btn.textContent='SENDING BOOKING...';
+
   const payload={
     name:document.getElementById('name').value.trim(),
-    phone:normalizePhone(document.getElementById('phone').value),
+    phone:document.getElementById('phone').value.trim(),
     pickup:document.getElementById('pickup').value.trim(),
     destination:document.getElementById('destination').value.trim(),
     date:document.getElementById('date').value,
@@ -247,56 +199,34 @@ document.getElementById('bookingForm').addEventListener('submit', async e=>{
     notes:document.getElementById('notes').value.trim(),
     source
   };
-  if(!validPhone(payload.phone)){
-    setStatus('Please enter a valid Indonesian WhatsApp number, for example +62 856 3859 777.');
-    document.getElementById('phone').focus(); return;
-  }
-  if(!Number.isInteger(payload.passengers)||payload.passengers<1||payload.passengers>16){
-    setStatus('Passengers must be a whole number from 1 to 16.'); return;
-  }
-  if(payload.date===todayISO){
-    const now=new Date();
-    const chosen=new Date(payload.date+'T'+payload.time);
-    if(chosen.getTime() < now.getTime()-60000){
-      setStatus('Pick-up time cannot be in the past. Please choose a later time.'); return;
-    }
-  }
-  let pending=getPending();
-  const clientRequestId=(pending && samePayload(pending.payload,payload)) ? pending.clientRequestId : makeRequestId();
-  setPending(payload,clientRequestId);
-  const btn=document.getElementById('submitBtn');
-  btn.disabled=true; btn.textContent='SENDING BOOKING...';
+
+  // The existing Book button is the WhatsApp connection: no extra WhatsApp button is needed.
+  openBookingWhatsApp(payload);
+
   try{
-    const data=await postBooking(payload,clientRequestId);
-    clearPending();
+    const r=await fetch(API_BASE+'/api/booking-requests',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(payload)
+    });
+    const data=await r.json();
+    if(!r.ok) throw new Error(data.error||'Booking failed');
+
     document.getElementById('summary').innerHTML=
       '<b>Booking ID:</b> '+esc(data.request_id)+'<br>'+
       '<b>Pick-up:</b> '+esc(payload.pickup)+'<br>'+
       '<b>Destination:</b> '+esc(payload.destination)+'<br>'+
       '<b>Date:</b> '+esc(payload.date)+'<br>'+
       '<b>Time:</b> '+esc(payload.time)+'<br>'+
-      '<b>Passengers:</b> '+esc(payload.passengers);
-    document.getElementById('whatsappConfirmBtn').href=buildWhatsAppUrl(payload,data.request_id);
+      '<b>Passengers:</b> '+payload.passengers;
+
     document.getElementById('bookingCard').style.display='none';
     document.getElementById('successCard').style.display='block';
-    document.getElementById('successCard').scrollIntoView({behavior:'smooth',block:'start'});
   }catch(err){
-    const message=err?.name==='AbortError'
-      ? 'The booking server took too long to respond. Your booking ID is preserved so retrying is safe.'
-      : (err?.message||'We could not send your booking.');
-    setStatus(message+' Please try again.');
+    alert('We could not send your booking. Please try again or contact us on WhatsApp.');
     btn.disabled=false; btn.textContent='BOOK MY RIDE';
   }
 });
-
-// Service worker intentionally disabled for booking reliability.
-// The booking API must use the page's native fetch directly.
-if('serviceWorker' in navigator){
-  window.addEventListener('load',()=>{
-    navigator.serviceWorker.getRegistrations().then(rs=>rs.forEach(r=>r.unregister())).catch(()=>{});
-    if(window.caches) caches.keys().then(keys=>Promise.all(keys.map(k=>caches.delete(k)))).catch(()=>{});
-  });
-}
 </script>
 </body>
 </html>
