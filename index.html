@@ -156,7 +156,7 @@ function resolveApiBase(){
   if(stored && !/^https?:\/\/(localhost|127\.0\.0\.1)(?::\d+)?$/i.test(stored)) return stored;
   return current;
 }
-const API_BASE = 'https://manojavaya-trans-api.manojavaya-trans.workers.dev';
+const API_BASE = 'https://manojavaya-trans-api.manojavayatrans.workers.dev';
 const source = new URLSearchParams(location.search).get('source') || 'WHATSAPP_QR';
 
 const d = new Date();
